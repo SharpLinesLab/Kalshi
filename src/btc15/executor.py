@@ -95,7 +95,7 @@ class Executor:
             if await c.get_positions(t) or await c.list_orders(ticker=t, status="resting"):
                 self.ledger.update_row(t, d.mode, note="ONE_PER_MARKET: API shows existing position/order")
                 return ExecResult(False, note="existing position/order")
-            bal_before = await c.get_balance()
+            bal_before = await c.get_balance(mkt.exchange_index)
         except KalshiError as e:
             self.ledger.update_row(t, d.mode, note=f"pre-trade check failed: {e}")
             return ExecResult(False, note="pre-trade check failed")
@@ -103,7 +103,7 @@ class Executor:
         cid = str(uuid.uuid4())
         self.ledger.update_row(t, d.mode, client_order_id=cid, note="order submitting")
         try:
-            resp = await c.place_order(t, book_side, d.contracts, px, cid)
+            resp = await c.place_order(t, book_side, d.contracts, px, cid, mkt.exchange_index)
         except KalshiError as e:
             if e.definite:
                 self.ledger.update_row(t, d.mode, note=f"order rejected: {e}")
@@ -134,7 +134,7 @@ class Executor:
         except KalshiError as e:
             self.halt.halt(f"ORDER_STATE_UNKNOWN {order_id}: {e}")
             return ExecResult(False, order_id=order_id, note="state unknown")
-        return await self._reconcile_order(d, order_id, order, bal_before)
+        return await self._reconcile_order(d, order_id, order, bal_before, mkt.exchange_index)
 
     async def _recover(self, ticker: str, cid: str) -> Optional[str]:
         """POST timed out: the order may or may not exist. Look it up by client_order_id; HALT if unsure."""
@@ -152,13 +152,14 @@ class Executor:
         self.halt.halt(f"ORDER_OUTCOME_UNKNOWN {ticker} client_order_id={cid}")
         return None
 
-    async def _reconcile_order(self, d: Decision, order_id: str, order: dict, bal_before: float) -> ExecResult:
+    async def _reconcile_order(self, d: Decision, order_id: str, order: dict, bal_before: float,
+                               shard: Optional[int] = None) -> ExecResult:
         c, t = self.client, d.ticker
         problems: list[str] = []
         try:
             fills = await c.get_fills(order_id)
             positions = await c.get_positions(t)
-            bal_after = await c.get_balance()
+            bal_after = await c.get_balance(shard)
         except KalshiError as e:
             self.halt.halt(f"RECONCILE_FETCH_FAILED {order_id}: {e}")
             return ExecResult(False, order_id=order_id, note="reconcile fetch failed")

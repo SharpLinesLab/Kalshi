@@ -60,6 +60,14 @@ no queue). No orders are ever sent and no Kalshi credentials are needed. Warm-up
 data-gap and volatility windows must fill, and one market boundary must pass to seed the basis) — until then the gates SKIP.
 Let it settle ≥ 300 markets; check `btc15 report` or `/calibration`.
 
+### Collateral lives on an exchange shard (important for DEMO and LIVE)
+Kalshi checks collateral inside each matching engine ("shard"), and programmatic traders must **pre-allocate funds to the
+shard that trades the market** before an order can be placed. KXBTC15M is a Crypto series on **shard 2**
+([docs](https://docs.kalshi.com/getting_started/exchange_sharding)). Funds sitting on shard 0 cannot fund it: an order is
+rejected with `insufficient_shard_balance`. Move collateral to shard 2 in the Kalshi UI (*Account → Exchange Indexes*) or with
+the Intra Account Transfer API. The bankroll the model sizes against, and every pre/post-order balance check, uses the
+market's own shard, and the dashboard's Readiness panel shows a **collateral** check until it is funded.
+
 ### 4. DEMO
 Put your **demo** key in `.env`, set `MODE=DEMO`. Real orders go to Kalshi's demo exchange (quotes also come from demo).
 Use it to confirm auth, order placement/cancel, fills, positions (including the BUY_DOWN sign) and the fee check. DEMO rows

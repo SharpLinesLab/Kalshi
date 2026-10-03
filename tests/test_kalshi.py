@@ -165,3 +165,25 @@ def test_spec_constants_are_the_documented_values():
     assert spec.REST_BASE["PROD"] == "https://external-api.kalshi.com/trade-api/v2"
     assert spec.REST_BASE["DEMO"] == "https://external-api.demo.kalshi.co/trade-api/v2"
     assert spec.SERIES == "KXBTC15M" and spec.SETTLE_WINDOW_SEC_DEFAULT == 60
+
+
+async def test_balance_uses_the_markets_own_shard_not_the_total(tmp_path):
+    body = {"balance": 5000, "balance_dollars": "50.0000", "balance_breakdown": [
+        {"exchange_index": 0, "balance": "50.0000"}, {"exchange_index": 2, "balance": "0.0000"}]}
+    c = client_with(lambda r: httpx.Response(200, json=body), tmp_path)
+    assert await c.get_balance() == 50.0                    # total spans all shards ...
+    assert await c.get_balance(0) == 50.0
+    assert await c.get_balance(2) == 0.0                    # ... but the Crypto shard (2) cannot fund an order
+
+
+async def test_order_carries_the_shard_and_parse_market_reads_it(tmp_path):
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"order_id": "o1"})
+    await client_with(handler, tmp_path).place_order("KXBTC15M-X", "ask", 1, 0.94, "c", exchange_index=2)
+    assert seen["body"]["exchange_index"] == 2
+    await client_with(handler, tmp_path).place_order("KXBTC15M-X", "bid", 1, 0.94, "c")
+    assert "exchange_index" not in seen["body"]
+    assert parse_market({**MARKET_JSON, "exchange_index": 2}, 0).exchange_index == 2

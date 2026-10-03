@@ -59,7 +59,8 @@ class FakeKalshi:
     async def get_market(self, ticker):
         return self.market
 
-    async def get_balance(self):
+    async def get_balance(self, exchange_index=None):
+        self.balance_shards = getattr(self, "balance_shards", []) + [exchange_index]
         return self.balance
 
     async def get_positions(self, ticker=None):
@@ -73,8 +74,9 @@ class FakeKalshi:
             return []
         return [o for o in self.orders.values() if (ticker is None or o["ticker"] == ticker) and (status is None or o["status"] == status)]
 
-    async def place_order(self, ticker, book_side, count, price, client_order_id=None):
+    async def place_order(self, ticker, book_side, count, price, client_order_id=None, exchange_index=None):
         self.placed.append({"ticker": ticker, "book_side": book_side, "count": count, "price": price})
+        self.last_shard = exchange_index
         if self.fail_place:
             if not self.fail_place.definite:                       # ambiguous: the order may have landed
                 self._create(ticker, book_side, count, price, client_order_id)
@@ -119,6 +121,6 @@ def make_market(now=1300.0, **kw) -> Market:
              price_ranges=[{"start": "0.0000", "end": "0.1000", "step": "0.0010"},
                            {"start": "0.1000", "end": "0.9000", "step": "0.0100"},
                            {"start": "0.9000", "end": "1.0000", "step": "0.0010"}],
-             result="", expiration_value=None, recv_ts=now)
+             result="", expiration_value=None, recv_ts=now, exchange_index=2)
     d.update(kw)
     return Market(**d)

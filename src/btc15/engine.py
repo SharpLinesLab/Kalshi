@@ -98,6 +98,11 @@ class Engine:
             {"name": "kalshi quote", "ok": self.market is not None and self.market.yes_ask is not None, "detail": self.market.ticker if self.market else "no open market"},
             {"name": "not halted", "ok": not self.halt.reason, "detail": self.halt.reason or ""},
         ]
+        if self.cfg.MODE != "PAPER":                       # orders need collateral on the market's own shard
+            shard = self.market.exchange_index if self.market else None
+            funded = (self.executor.bankroll or 0) >= 1.0
+            checks.append({"name": "collateral", "ok": funded, "detail": (f"${self.executor.bankroll:.2f} on shard {shard}" if funded else
+                           f"fund exchange shard {shard}: transfer collateral to it in the Kalshi UI (Account > Exchange Indexes)")})
         eta = max(0, need - present) if not checks[1]["ok"] else 0
         return {"ready": all(c["ok"] for c in checks), "checks": checks, "history_eta_sec": eta,
                 "predicting": predicting}
@@ -207,7 +212,7 @@ class Engine:
         elif now - self._t_bank > 15 and self.client is not None:
             self._t_bank = now
             try:
-                self.executor.bankroll = await self.client.get_balance()
+                self.executor.bankroll = await self.client.get_balance(m.exchange_index)
             except KalshiError as e:
                 log.warning("balance error: %s", e)
         if now - self._t_proof > 60:

@@ -110,6 +110,7 @@ class Market:
     result: str
     expiration_value: Optional[float]
     recv_ts: float
+    exchange_index: Optional[int] = None      # shard that matches this market (Crypto = 2); collateral must be there
 
 
 def _ts(iso: str) -> float:
@@ -131,6 +132,7 @@ def parse_market(m: dict, recv_ts: float) -> Market:
         no_bid=_px(m, "no_bid_dollars"), no_ask=_px(m, "no_ask_dollars"),
         price_ranges=m.get("price_ranges") or [], result=m.get("result") or "",
         expiration_value=float(D(ev)) if ev not in (None, "") else None, recv_ts=recv_ts,
+        exchange_index=m.get("exchange_index"),
     )
 
 
@@ -186,8 +188,14 @@ class KalshiClient:
         return d["orderbook_fp"]
 
     # ---------------- portfolio (authenticated)
-    async def get_balance(self) -> float:
+    async def get_balance(self, exchange_index: Optional[int] = None) -> float:
+        """Available balance in dollars. Orders are collateralised PER EXCHANGE SHARD, so pass the market's
+        exchange_index to get what can actually fund an order (the default total spans all shards)."""
         d = await self._request("GET", "/portfolio/balance")
+        if exchange_index is not None:
+            for row in d.get("balance_breakdown") or []:
+                if row.get("exchange_index") == exchange_index:
+                    return float(D(row["balance"]))
         if d.get("balance_dollars") not in (None, ""):
             return float(D(d["balance_dollars"]))
         return d["balance"] / 100.0
@@ -214,7 +222,8 @@ class KalshiClient:
     async def get_fills(self, order_id: str) -> list[dict]:
         return (await self._request("GET", "/portfolio/fills", params={"order_id": order_id, "limit": 200})).get("fills", [])
 
-    async def place_order(self, ticker: str, book_side: str, count: int, price: float, client_order_id: Optional[str] = None) -> dict:
+    async def place_order(self, ticker: str, book_side: str, count: int, price: float,
+                          client_order_id: Optional[str] = None, exchange_index: Optional[int] = None) -> dict:
         """V2 order, YES-book only: 'bid' = buy YES, 'ask' = sell YES (== buy NO at 1-price). Always a limit GTC order."""
         body = {
             "ticker": ticker, "client_order_id": client_order_id or str(uuid.uuid4()),
@@ -222,6 +231,8 @@ class KalshiClient:
             "time_in_force": "good_till_canceled", "self_trade_prevention_type": "taker_at_cross",
             "post_only": False, "reduce_only": False,
         }
+        if exchange_index is not None:                      # explicit shard; omitted => auto-route by ticker
+            body["exchange_index"] = exchange_index
         return await self._request("POST", "/portfolio/events/orders", body=body)
 
     async def cancel_order(self, order_id: str, ticker: str) -> dict:

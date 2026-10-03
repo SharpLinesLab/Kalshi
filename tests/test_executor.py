@@ -92,9 +92,9 @@ async def test_balance_mismatch_halts():
     orig = fake.get_balance
     calls = {"n": 0}
 
-    async def shifty():
+    async def shifty(shard=None):
         calls["n"] += 1
-        return await orig() - (5.0 if calls["n"] >= 2 else 0.0)            # money vanished between before/after
+        return await orig(shard) - (5.0 if calls["n"] >= 2 else 0.0)            # money vanished between before/after
     fake.get_balance = shifty
     await ex.execute(d, make_market())
     assert "balance" in led.halt_reason()
@@ -210,3 +210,27 @@ async def test_reconcile_ignores_markets_already_closed_and_settling():
     led.db.execute("DELETE FROM markets")
     open_trade(led, close=1400.0)
     assert await ex.reconcile_positions(1500.0) == [] and not led.halt_reason()
+
+
+async def test_real_orders_and_balance_checks_use_the_markets_shard():
+    cfg, led, fake, ex, d, *_ = setup()
+    await ex.execute(d, make_market())
+    assert fake.last_shard == 2 and set(fake.balance_shards) == {2}
+
+
+async def test_unfunded_shard_is_reported_by_readiness(tmp_path):
+    import btc15.engine as eng
+    from btc15.engine import AppState, Engine
+    from btc15.feeds import FeedBook
+    cfg = make_cfg(MODE="DEMO", KILL_FILE=str(tmp_path / "KILL"))
+    led = Ledger(":memory:")
+    fake = FakeKalshi(balance=0.0, market=make_market(1300.0))
+    halt = Halt(led)
+    e = Engine(cfg, led, fake, FeedBook(), Executor(cfg, fake, led, halt), halt, AppState())
+    await e.tick(1300.0)
+    chk = next(c for c in e.app.readiness["checks"] if c["name"] == "collateral")
+    assert chk["ok"] is False and "shard 2" in chk["detail"]
+    fake.balance = 50.0
+    e._t_bank = 0
+    await e.tick(1320.0)
+    assert next(c for c in e.app.readiness["checks"] if c["name"] == "collateral")["ok"] is True
