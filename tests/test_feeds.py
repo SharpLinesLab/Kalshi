@@ -18,14 +18,23 @@ def test_parsers_on_real_message_shapes():
     assert feeds.parse_bitstamp({"event": "bts:subscription_succeeded"}, {}) is None
 
 
-def test_gemini_top_of_book_needs_both_sides_and_ignores_crossed_books():
+def test_gemini_l2_maintains_a_local_book_and_ignores_crossed_books():
     st: dict = {}
-    init = {"type": "update", "events": [{"type": "change", "side": "ask", "price": "84896.22", "remaining": "0.03", "reason": "initial"},
-                                         {"type": "change", "side": "bid", "price": "84896.21", "remaining": "0.04", "reason": "initial"}]}
-    assert feeds.parse_gemini(init, st) == pytest.approx(84896.215)
-    one_side = {"type": "update", "events": [{"type": "change", "side": "bid", "price": "84900.00", "remaining": "0.2"}]}
-    assert feeds.parse_gemini(one_side, st) is None                    # bid 84900 > ask 84896.22 -> crossed -> ignored
+    snap = {"type": "l2_updates", "symbol": "BTCUSD", "changes": [["buy", "84830.07", "0.15"], ["buy", "84817.44", "0.03"],
+                                                               ["sell", "84865.00", "3.0"], ["sell", "84840.10", "0.2"]]}
+    assert feeds.parse_gemini(snap, st) == pytest.approx((84830.07 + 84840.10) / 2)
+    better = {"type": "l2_updates", "symbol": "BTCUSD", "changes": [["buy", "84835.00", "0.5"]]}
+    assert feeds.parse_gemini(better, st) == pytest.approx((84835.00 + 84840.10) / 2)
+    pulled = {"type": "l2_updates", "symbol": "BTCUSD", "changes": [["buy", "84835.00", "0"]]}     # best bid removed
+    assert feeds.parse_gemini(pulled, st) == pytest.approx((84830.07 + 84840.10) / 2)
+    crossed = {"type": "l2_updates", "symbol": "BTCUSD", "changes": [["buy", "84900.00", "1"]]}
+    assert feeds.parse_gemini(crossed, st) is None
     assert feeds.parse_gemini({"type": "heartbeat"}, st) is None
+    assert feeds.parse_gemini({"type": "l2_updates", "symbol": "ETHUSD", "changes": []}, {}) is None
+
+
+def test_kraken_subscription_uses_bbo_trigger():
+    assert feeds.SPECS["kraken"].subscribe[0]["params"]["event_trigger"] == "bbo"
 
 
 def test_garbage_is_ignored():

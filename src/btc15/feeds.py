@@ -58,19 +58,25 @@ def parse_bitstamp(msg: dict, state: dict) -> Optional[float]:
 
 
 def parse_gemini(msg: dict, state: dict) -> Optional[float]:
-    """top_of_book stream: each 'change' event carries the new best price for one side."""
-    if msg.get("type") != "update":
+    """v2 L2 stream: maintain a local book from the snapshot + incremental `changes`; mid = best bid/ask."""
+    if msg.get("type") != "l2_updates" or msg.get("symbol", "BTCUSD") != "BTCUSD":
         return None
-    for ev in msg.get("events", []):
-        if ev.get("type") == "change" and ev.get("side") in ("bid", "ask"):
-            try:
-                if float(ev.get("remaining", 1)) > 0:
-                    state[ev["side"]] = float(ev["price"])
-            except (TypeError, ValueError):
-                pass
-    if "bid" in state and "ask" in state:
-        return _sane_mid(state["bid"], state["ask"])
-    return None
+    bids, asks = state.setdefault("bids", {}), state.setdefault("asks", {})
+    for ch in msg.get("changes", []):
+        try:
+            side, price, qty = ch[0], float(ch[1]), float(ch[2])
+        except (TypeError, ValueError, IndexError):
+            continue
+        book = bids if side == "buy" else asks if side == "sell" else None
+        if book is None:
+            continue
+        if qty > 0:
+            book[price] = qty
+        else:
+            book.pop(price, None)
+    if not bids or not asks:
+        return None
+    return _sane_mid(max(bids), min(asks))
 
 
 @dataclass
@@ -80,14 +86,18 @@ class FeedSpec:
     parse: Callable[[dict, dict], Optional[float]]
 
 
+# Kraken uses event_trigger=bbo (update on every best bid/offer change); the default fires only on trades and
+# was observed quiet for ~10s, which would make the feed flap between FRESH and STALE.
 SPECS: dict[str, FeedSpec] = {
     "coinbase": FeedSpec("wss://ws-feed.exchange.coinbase.com",
                          [{"type": "subscribe", "product_ids": ["BTC-USD"], "channels": ["ticker"]}], parse_coinbase),
     "kraken": FeedSpec("wss://ws.kraken.com/v2",
-                       [{"method": "subscribe", "params": {"channel": "ticker", "symbol": ["BTC/USD"]}}], parse_kraken),
+                       [{"method": "subscribe", "params": {"channel": "ticker", "symbol": ["BTC/USD"], "event_trigger": "bbo"}}],
+                       parse_kraken),
     "bitstamp": FeedSpec("wss://ws.bitstamp.net",
                          [{"event": "bts:subscribe", "data": {"channel": "order_book_btcusd"}}], parse_bitstamp),
-    "gemini": FeedSpec("wss://api.gemini.com/v1/marketdata/BTCUSD?top_of_book=true&bids=true&offers=true", [], parse_gemini),
+    "gemini": FeedSpec("wss://api.gemini.com/v2/marketdata",
+                       [{"type": "subscribe", "subscriptions": [{"name": "l2", "symbols": ["BTCUSD"]}]}], parse_gemini),
 }
 
 
