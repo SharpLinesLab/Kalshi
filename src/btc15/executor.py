@@ -38,16 +38,21 @@ class ExecResult:
 class Halt:
     """Persistent halt flag backed by the ledger (survives restarts until `reset-halt`)."""
 
-    def __init__(self, ledger: Ledger):
+    def __init__(self, ledger: Ledger, on_halt: Optional[Callable[[str], None]] = None):
         self.ledger = ledger
+        self.on_halt = on_halt
 
     @property
     def reason(self) -> Optional[str]:
         return self.ledger.halt_reason()
 
     def halt(self, reason: str) -> None:
+        if self.ledger.halt_reason():          # already halted: keep the FIRST reason, no log/alert spam
+            return
         log.error("HALT: %s", reason)
         self.ledger.set_halt(reason)
+        if self.on_halt:
+            self.on_halt(reason)
 
 
 class Executor:

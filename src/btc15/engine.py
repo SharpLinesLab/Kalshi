@@ -14,6 +14,7 @@ from .config import Settings
 from .executor import Executor, Halt
 from .feeds import FeedBook
 from .kalshi import KalshiClient, KalshiError, Market
+from .notify import Notifier
 from .ledger import Ledger, utc_day_start
 
 log = logging.getLogger("btc15.engine")
@@ -43,9 +44,12 @@ class AppState:
 
 class Engine:
     def __init__(self, cfg: Settings, ledger: Ledger, client: Optional[KalshiClient], book: FeedBook,
-                 executor: Executor, halt: Halt, app: AppState):
+                 executor: Executor, halt: Halt, app: AppState, notifier: Optional[Notifier] = None):
         self.cfg, self.ledger, self.client, self.book = cfg, ledger, client, book
         self.executor, self.halt, self.app = executor, halt, app
+        self.notify = notifier or Notifier(None, mode=cfg.MODE)
+        if self.notify.enabled and halt.on_halt is None:
+            halt.on_halt = self.notify.halted
         self.market: Optional[Market] = None
         self.prev_action: dict[str, str] = {}
         self.acted: set[str] = set()
@@ -232,8 +236,10 @@ class Engine:
         if d.action != "SKIP" and prev == "SKIP" and m.ticker not in self.acted:
             self.acted.add(m.ticker)
             self.ledger.record_decision(dd, "BUY", m.open_ts, m.close_ts)
+            self.notify.call(d, m)                                  # alert first: the call matters even if execution fails
             res = await self.executor.execute(d, m)
             log.info("EXEC %s %s -> ok=%s %s", d.action, m.ticker, res.ok, res.note)
+            self.notify.fill(d, res)
         elif elapsed >= SHADOW_AT_SEC and m.ticker not in self.acted:
             shadow = dd if d.action == "SKIP" else {**dd, "action": "SKIP", "reason": "NO_SKIP_TO_BUY_TRANSITION"}
             self.ledger.record_decision(shadow, "SHADOW", m.open_ts, m.close_ts)
@@ -267,6 +273,9 @@ class Engine:
                 continue
             if m.result in ("yes", "no"):
                 self.ledger.settle_row(row["ticker"], self.cfg.MODE, m.result, "kalshi_market", m.expiration_value)
+                done = self.ledger.get_row(row["ticker"], self.cfg.MODE)
+                if done and (done["filled_contracts"] or 0) > 0:
+                    self.notify.settled(done)
                 f60 = self.book.window_mean(int(row["close_ts"]), 60)
                 if f60 is not None and m.expiration_value is not None:
                     diff = f60 - m.expiration_value

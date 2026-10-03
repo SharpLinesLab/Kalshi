@@ -90,6 +90,14 @@ The process refuses to start (exit 2) if any is missing. A persistent red **LIVE
 HALT triggers: kill file / `POST /kill` / dashboard button, 3 consecutive API errors, any reconciliation mismatch (order vs
 fills vs position vs balance, or API positions vs ledger), ambiguous order outcome. HALT is **persistent** across restarts.
 
+## Discord alerts
+Set `DISCORD_WEBHOOK_URL` (Discord: *Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL*).
+You get a message for each **BUY UP / BUY DOWN** call (size, price, max loss, payout, model p vs market, edge, proof status,
+and the mode: PAPER / DEMO / LIVE), the fill result, the **settlement result** (won/lost and PnL) and any **HALT**.
+Alerts are informational and fire-and-forget: a failing webhook never affects trading, and the URL is never logged.
+There is deliberately **no sell / take-profit / stop-loss**: the strategy holds to settlement, and a binary contract's
+worst case is already the stake (shown as "max loss" in every alert).
+
 ## Design notes
 * **One decision per market**, only on the `SKIP → BUY` transition (never on the first observation), limit buy at the ask,
   cancelled if not fully filled in 10 s, never a market order, never sells, holds to settlement.

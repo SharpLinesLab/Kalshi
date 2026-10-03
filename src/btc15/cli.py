@@ -28,6 +28,7 @@ async def _run(cfg: Settings) -> None:
     from .engine import AppState, Engine
     from .executor import Executor, Halt
     from .feeds import FEEDS, FeedBook, run_feed
+    from .notify import Notifier
 
     ledger = Ledger(cfg.DB_PATH)
     pv = cfg.params_version()
@@ -38,10 +39,12 @@ async def _run(cfg: Settings) -> None:
                     status, cfg.effective_max_contracts(status))
     client = _client(cfg)
     halt, book, app_state = Halt(ledger), FeedBook(), AppState(mode=cfg.MODE)
+    notifier = Notifier(cfg.DISCORD_WEBHOOK_URL, mode=cfg.MODE)
+    log.info("discord alerts: %s", "on" if notifier.enabled else "off")
     if os.path.exists(cfg.KILL_FILE):
         halt.halt("KILL file present at startup")
     executor = Executor(cfg, client, ledger, halt)
-    engine = Engine(cfg, ledger, client, book, executor, halt, app_state)
+    engine = Engine(cfg, ledger, client, book, executor, halt, app_state, notifier)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -61,6 +64,7 @@ async def _run(cfg: Settings) -> None:
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    await notifier.aclose()
     await client.aclose()
 
 

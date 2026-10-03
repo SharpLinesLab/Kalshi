@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     MAX_TOTAL_LOSS_USD: Optional[float] = None
     MAX_CONTRACTS_PER_TRADE: Optional[int] = None
 
+    # --- alerts (secret: anyone with the URL can post to the channel) ---
+    DISCORD_WEBHOOK_URL: Optional[str] = None
+
     # --- bankroll / storage ---
     PAPER_BANKROLL: float = 1000.0
     DB_PATH: str = "btc15.db"
@@ -119,6 +122,10 @@ def validate_for_start(s: Settings, proof_status: str) -> None:
                 problems.append(f"{name} must be set to a positive value")
         if proof_status != "PROVEN" and s.ALLOW_UNPROVEN != "yes":
             problems.append("proof status is UNPROVEN: ALLOW_UNPROVEN=yes is required for LIVE")
+    if s.DISCORD_WEBHOOK_URL:
+        from .notify import valid_webhook
+        if not valid_webhook(s.DISCORD_WEBHOOK_URL):
+            problems.append("DISCORD_WEBHOOK_URL must be a https://discord.com/api/webhooks/... URL")
     if s.SETTLE_WINDOW_SEC <= 0:
         problems.append("SETTLE_WINDOW_SEC must be positive")
     if problems:
