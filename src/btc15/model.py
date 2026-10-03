@@ -112,7 +112,11 @@ def realized_vol(series: dict[int, float], now_sec: int, window: int = 1800,
     med = statistics.median(valid)
     mad = statistics.median(abs(r - med) for r in valid)
     if mad == 0:
-        mad = statistics.fmean(abs(r - med) for r in valid)   # price often unchanged for seconds
+        # The composite is often unchanged for a second: when over half the returns are exactly zero the MAD
+        # collapses to 0. Take it over the non-zero returns instead; a mean-based fallback clipped real moves
+        # and understated vol by ~45% on live data.
+        nz = [abs(r - med) for r in valid if r != med]
+        mad = statistics.median(nz) if nz else 0.0
     if mad == 0:
         return None
     cut = 10.0 * mad

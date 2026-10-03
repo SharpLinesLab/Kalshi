@@ -241,7 +241,7 @@ class Engine:
         if d.action != "SKIP" and prev == "SKIP" and m.ticker not in self.acted:
             self.acted.add(m.ticker)
             self.ledger.record_decision(dd, "BUY", m.open_ts, m.close_ts)
-            self.notify.call(d, m)                                  # alert first: the call matters even if execution fails
+            self.notify.call(d, m, cfg.MIN_EDGE, cfg.FEE_RATE, cfg.PAPER_BANKROLL if cfg.MODE == "PAPER" else None)
             res = await self.executor.execute(d, m)
             log.info("EXEC %s %s -> ok=%s %s", d.action, m.ticker, res.ok, res.note)
             self.notify.fill(d, res)

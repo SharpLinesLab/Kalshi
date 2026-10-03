@@ -65,11 +65,12 @@ async def test_buy_up_alert_has_the_call_size_risk_and_no_exit_instructions():
     url, body = sent[0]
     e = body["embeds"][0]
     assert url == URL and body["allowed_mentions"] == {"parse": []}
-    assert e["title"] == f"BUY UP · {d.contracts} @ 66¢"
+    assert e["title"] == f"BUY UP (YES) @ 66¢ · {d.contracts} contracts"
     fields = {f["name"]: f["value"] for f in e["fields"]}
-    assert fields["Side"] == "UP (YES)" and fields["Max loss"].startswith("$") and fields["Pays if right"] == f"${d.contracts:.2f}"
-    assert "KXBTC15M-26OCT031200-00" in e["description"] and "Hold to settlement" in e["description"]
-    assert "PAPER" in e["footer"]["text"]
+    assert fields["Max loss"].startswith("$") and fields["Pays if right"] == f"${d.contracts:.2f}"
+    assert fields["Don't pay above"].endswith("¢") and int(fields["Don't pay above"][:-1]) >= 66
+    assert "KXBTC15M-26OCT031200-00" in e["description"] and "tap **YES**" in e["description"] and "Limit" in e["description"]
+    assert "Hold to settlement" in e["description"] and "Call only" in e["footer"]["text"]
 
 
 async def test_buy_down_alert():
@@ -80,13 +81,15 @@ async def test_buy_down_alert():
     n.call(d, make_market())
     await drain(n)
     e = sent[0][1]["embeds"][0]
-    assert e["title"].startswith("BUY DOWN") and "66¢" in e["title"] and "LIVE (real money)" in e["footer"]["text"]
+    assert e["title"].startswith("BUY DOWN (NO)") and "66¢" in e["title"] and "LIVE (real money)" in e["footer"]["text"]
+    assert "tap **NO**" not in e["description"]                                  # LIVE/DEMO place the order themselves
 
 
 async def test_fill_settled_and_halt_messages():
     sent, http = capture()
     n = Notifier(URL, http)
     d = decision()
+    n.mode = "DEMO"                                   # fill messages exist for modes that actually place orders
     n.fill(d, ExecResult(True, 3.0, 0.66, 0.05, "o1", "x"))
     n.fill(d, ExecResult(True, 0.0, None, 0.0, "o1", "x"))
     n.fill(d, ExecResult(False, note="rejected"))
@@ -155,7 +158,7 @@ async def test_engine_alerts_once_per_call_on_the_transition_and_on_settlement(t
     await drain(n)
     titles = [b["embeds"][0]["title"] for _, b in sent]
     assert sum(t.startswith("BUY UP") for t in titles) == 1                       # one alert, not one per second
-    assert any(t.startswith("Filled") for t in titles)
+    assert not any(t.startswith("Filled") for t in titles)                        # PAPER: no simulated-fill noise
     fake.market = make_market(NOW, status="finalized", result="yes", expiration_value=100010.0)
     await e.settle_pending(2000.0)
     await drain(n)
@@ -171,3 +174,26 @@ async def test_halt_alert_fires_once_and_keeps_the_first_reason(tmp_path):
     halt.halt("something else")
     await drain(n)
     assert len(sent) == 1 and halt.reason == "API_ERRORS: 3 consecutive"
+
+
+async def test_buy_down_manual_alert_says_tap_no_and_has_a_price_ceiling():
+    sent, http = capture()
+    n = Notifier(URL, http, mode="PAPER")
+    d = decision(composite=99_750.0, yes_bid=0.34, yes_ask=0.36, no_bid=0.64, no_ask=0.66)
+    n.call(d, make_market(), 0.05, 0.07, 1000.0)
+    await drain(n)
+    e = sent[0][1]["embeds"][0]
+    assert "tap **NO**" in e["description"] and "$1,000 bankroll" in e["description"]
+    cap = int({f["name"]: f["value"] for f in e["fields"]}["Don't pay above"][:-1]) / 100
+    p_no = 1 - d.p
+    from btc15 import model
+    assert p_no - cap - model.fee(cap, 1) >= 0.05 - 1e-9                          # still has the minimum edge at the ceiling
+    assert p_no - (cap + 0.01) - model.fee(cap + 0.01, 1) < 0.05                  # and loses it one cent higher
+
+
+async def test_paper_mode_does_not_post_simulated_fills():
+    sent, http = capture()
+    n = Notifier(URL, http, mode="PAPER")
+    n.fill(decision(), ExecResult(True, 3.0, 0.66, 0.05, "o1", "x"))
+    await drain(n)
+    assert sent == []

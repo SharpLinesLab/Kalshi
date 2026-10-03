@@ -119,3 +119,36 @@ def test_ewma_half_life():
     a = model.ewma_alpha(8)
     assert (1 - a) ** 8 == pytest.approx(0.5)
     assert model.ewma_update(None, 3.0, 8) == 3.0
+
+
+def sticky(series, hold_prob=0.55, seed=11):
+    """Like the live composite: the price is unchanged in a large share of seconds (zero 1s returns)."""
+    rng = random.Random(seed)
+    out, last = {}, None
+    for s in sorted(series):
+        if last is None or rng.random() > hold_prob:
+            last = series[s]
+        out[s] = last
+    return out
+
+
+@pytest.mark.parametrize("vol", [0.2, 0.5])
+def test_realized_vol_is_not_understated_when_most_returns_are_exactly_zero(vol):
+    series, now = gbm_series(vol, seed=5)
+    held = sticky(series)
+    rets = [math.log(held[s + 1] / held[s]) for s in range(now - 1800, now - 1)]
+    assert sum(r == 0 for r in rets) / len(rets) > 0.5                        # MAD of all returns is 0 here
+    est = model.realized_vol(held, now)
+    assert est is not None and abs(est / vol - 1) <= 0.20                      # old fallback returned ~0.55x
+
+
+def test_outlier_filter_still_removes_jumps_in_a_sticky_series():
+    vol = 0.5
+    series, now = gbm_series(vol, seed=9)
+    level, shifted = 1.0, {}
+    for s in sorted(series):
+        if s in {now - 1400, now - 900, now - 400}:
+            level *= 1.01
+        shifted[s] = series[s] * level
+    est = model.realized_vol(sticky(shifted), now)
+    assert est is not None and abs(est / vol - 1) <= 0.25

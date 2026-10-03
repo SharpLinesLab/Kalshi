@@ -55,7 +55,7 @@ class Notifier:
         return self._url is not None
 
     def _label(self) -> str:
-        return {"PAPER": "PAPER (simulated, no real order)", "DEMO": "DEMO (Kalshi demo exchange)",
+        return {"PAPER": "Call only: nothing is placed for you", "DEMO": "DEMO (Kalshi demo exchange)",
                 "LIVE": "LIVE (real money)"}.get(self.mode, self.mode)
 
     # ------------------------------------------------------------------ transport
@@ -99,16 +99,37 @@ class Notifier:
             await self._http.aclose()
 
     # ------------------------------------------------------------------ messages
-    def call(self, d, market) -> None:
+    @staticmethod
+    def max_price(d, min_edge: float, fee_rate: float) -> Optional[float]:
+        """Highest limit price (whole cents) at which the model's edge after fee is still >= min_edge.
+        If the market has moved above this, the call no longer holds: skip it."""
+        from . import model
+        p_side = d.p if d.side == "yes" else 1.0 - d.p
+        best = None
+        for cents in range(int(round(d.price * 100)), 100):
+            px = cents / 100
+            if p_side - px - model.fee(px, 1, fee_rate) >= min_edge:
+                best = px
+            else:
+                break
+        return best
+
+    def call(self, d, market, min_edge: float = 0.05, fee_rate: float = 0.07, bankroll: Optional[float] = None) -> None:
         up = d.action == "BUY_UP"
-        side = "UP (YES)" if up else "DOWN (NO)"
+        word = "YES" if up else "NO"
+        cap = self.max_price(d, min_edge, fee_rate)
+        manual = self.mode == "PAPER"
+        sized = f" (sized for a ${bankroll:,.0f} bankroll)" if bankroll else ""
+        how = (f"On Kalshi open this market, tap **{word}**, choose **Limit**, price **{_c(d.price)}** or lower, "
+               f"**{d.contracts} contracts**{sized}. Hold to settlement: no stop-loss or take-profit, "
+               f"the most you can lose is the stake.") if manual else \
+              "Hold to settlement. No stop-loss or take-profit: the most you can lose is the stake."
         self.fire({
-            "title": f"BUY {'UP' if up else 'DOWN'} · {d.contracts} @ {_c(d.price)}",
-            "description": f"`{d.ticker}`\nStrike {market.strike:,.2f} · closes {_hhmm(market.close_ts)}\n"
-                           f"Hold to settlement. No stop-loss or take-profit: the most you can lose is the stake.",
+            "title": f"BUY {'UP' if up else 'DOWN'} ({word}) @ {_c(d.price)} · {d.contracts} contracts",
+            "description": f"`{d.ticker}`\nStrike {market.strike:,.2f} · closes {_hhmm(market.close_ts)}\n{how}",
             "color": GREEN if up else RED,
             "fields": [
-                {"name": "Side", "value": side, "inline": True},
+                {"name": "Don't pay above", "value": _c(cap), "inline": True},
                 {"name": "Max loss", "value": _usd(d.max_loss), "inline": True},
                 {"name": "Pays if right", "value": _usd(d.max_payout), "inline": True},
                 {"name": "Model p(up) vs market", "value": f"{d.p:.3f} vs {d.p_mkt:.3f}", "inline": True},
@@ -117,6 +138,8 @@ class Notifier:
             ]})
 
     def fill(self, d, res) -> None:
+        if self.mode == "PAPER":                  # simulated fills are noise when you place bets yourself
+            return
         if res.ok and res.filled > 0:
             title, color, text = f"Filled {res.filled:g}/{d.contracts} @ {_c(res.fill_price)}", BLUE, f"Fee {_usd(res.fee)}"
         elif res.ok:
