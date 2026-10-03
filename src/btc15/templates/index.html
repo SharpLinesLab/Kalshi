@@ -1,0 +1,61 @@
+{% extends "base.html" %}{% block body %}
+<div id="halt" class="halt" style="display:none"></div>
+<div class="card">
+  <div id="action" class="big">…</div>
+  <div id="line" class="sub"></div>
+  <div id="chips" class="chips"></div>
+</div>
+<div class="card"><h2>Why</h2><table>
+  <tr><th>p (model) vs p_mkt</th><td id="why1" class="num"></td></tr>
+  <tr><th>Edge after fee (up / down)</th><td id="why2" class="num"></td></tr>
+  <tr><th>Vol used · realized · implied</th><td id="why3" class="num"></td></tr>
+  <tr><th>Market</th><td id="why4" class="num"></td></tr>
+</table></div>
+<div class="card"><h2>Reference feeds <span id="clone" class="neg"></span></h2>
+  <table><thead><tr><th>Feed</th><th>Mid</th><th>Age</th><th>Status</th></tr></thead><tbody id="feeds"></tbody></table>
+  <div class="sub" id="comp" style="text-align:left;margin-top:8px"></div></div>
+<div class="card"><h2>PnL ({{ mode }})</h2><table>
+  <tr><th>Today (UTC)</th><td id="pnl_d" class="num"></td></tr>
+  <tr><th>All time</th><td id="pnl_t" class="num"></td></tr>
+  <tr><th>Bankroll</th><td id="bank" class="num"></td></tr>
+  <tr><th>Proof</th><td id="proof"></td></tr></table></div>
+<div class="card"><h2>Open position</h2><div id="pos">none</div></div>
+<div class="card"><button class="kill" onclick="document.getElementById('m').style.display='flex'">KILL SWITCH</button></div>
+<div class="modal" id="m"><div class="box"><b>Kill switch</b>
+  <p>Stops all entries, cancels resting orders and HALTS. Resume only with <code>btc15 reset-halt</code>.</p>
+  <button style="background:#a3182b;color:#fff" onclick="doKill()">Yes, kill</button>
+  <button onclick="document.getElementById('m').style.display='none'">Cancel</button>
+  <div id="kmsg"></div></div></div>
+<script>
+const $=id=>document.getElementById(id);
+const f=(x,d=3)=>x==null?'–':Number(x).toFixed(d);
+const c=x=>x==null?'–':(x*100).toFixed(1)+'¢';
+const usd=x=>(x<0?'-':'')+'$'+Math.abs(x).toFixed(2);
+async function doKill(){const r=await fetch('/kill',{method:'POST'});const j=await r.json().catch(()=>({}));
+  $('kmsg').textContent=r.ok?j.message:'failed: '+r.status;}
+function render(s){
+  const d=s.decision;
+  $('halt').style.display=s.halted?'block':'none'; $('halt').textContent=s.halted?('HALTED: '+s.halted):'';
+  if(!d){ $('action').textContent='NO MARKET'; $('action').style.color='var(--skip)'; $('line').textContent=''; $('chips').innerHTML=''; }
+  else{
+    const a=d.action; $('action').textContent=a.replace('_',' ');
+    $('action').style.color=a==='BUY_UP'?'var(--up)':a==='BUY_DOWN'?'var(--dn)':'var(--skip)';
+    $('line').textContent=(a==='SKIP'?('SKIP · '+d.reason):(d.contracts+' @ '+c(d.price)+' · max loss '+usd(d.max_loss)+' · pays '+usd(d.max_payout)))
+      +' · '+d.mode+' · '+d.proof_status+(d.ref_label?(' · '+d.ref_label):'');
+    $('chips').innerHTML=d.gates.map(g=>`<span class="chip ${g.passed?'pass':'fail'}" title="${g.detail.replace(/"/g,'')}">${g.name}</span>`).join('');
+    $('why1').textContent=f(d.p)+' vs '+f(d.p_mkt)+' (Δ '+(d.p==null?'–':f(d.p-d.p_mkt))+')';
+    $('why2').textContent=f(d.edge_up)+' / '+f(d.edge_dn);
+    $('why3').textContent=f(d.vol_used)+' · '+f(d.realized_vol)+' · '+f(d.implied_vol);
+  }
+  const m=s.market; $('why4').textContent=m?(m.ticker+' strike '+m.strike+' · yes '+c(m.yes_bid)+'/'+c(m.yes_ask)+' no '+c(m.no_bid)+'/'+c(m.no_ask)):'–';
+  $('feeds').innerHTML=s.feeds.map(r=>`<tr><td>${r.feed}</td><td class="num">${r.mid==null?'–':r.mid.toFixed(2)}</td><td class="num">${r.age==null?'–':r.age.toFixed(1)+'s'}</td><td class="${r.status==='FRESH'?'pos':'neg'}">${r.status}</td></tr>`).join('');
+  $('clone').textContent=s.clone_suspect?'FEED_CLONE_SUSPECT':'';
+  $('comp').textContent='composite '+f(s.composite,2)+' · basis '+f(s.basis,2);
+  $('pnl_d').textContent=usd(s.daily_pnl); $('pnl_d').className='num '+(s.daily_pnl<0?'neg':'pos');
+  $('pnl_t').textContent=usd(s.total_pnl); $('bank').textContent=usd(s.bankroll);
+  const p=s.proof; $('proof').textContent=p?(p.status+' ('+p.n_settled+' settled)'):'–';
+  const o=s.open_position; $('pos').textContent=o?(o.ticker+' · '+(o.side||'').toUpperCase()+' '+o.filled_contracts+' @ '+c(o.fill_price)):'none';
+}
+async function tick(){try{const r=await fetch('/api/state');if(r.ok)render(await r.json());}catch(e){} setTimeout(tick,1000);}
+tick();
+</script>{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block body %}
+<div class="card"><h2>Proof status</h2>
+  <div class="big" style="font-size:32px;color:{{ 'var(--ok)' if rep.status=='PROVEN' else 'var(--warn)' }}">{{ rep.status }}</div>
+  <div class="sub">params_version {{ pv }} · settled {{ rep.n_settled }} · trades {{ rep.n_trades }}</div>
+  {% if rep.failing %}<ul>{% for f in rep.failing %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}</div>
+<div class="card"><h2>Headline</h2><div style="font-size:18px;font-weight:700">{{ rep.headline }}</div></div>
+<div class="card"><h2>Brier score (lower is better)</h2><table>
+  <tr><th>p (model)</th><td class="num">{{ '%.4f'|format(rep.brier_p) if rep.brier_p is not none else '–' }}</td></tr>
+  <tr><th>p_mkt (market mid)</th><td class="num">{{ '%.4f'|format(rep.brier_mkt) if rep.brier_mkt is not none else '–' }}</td></tr>
+  <tr><th>p_realized (constant base-rate baseline)</th><td class="num">{{ '%.4f'|format(rep.brier_const) if rep.brier_const is not none else '–' }}</td></tr>
+  <tr><th>ROI after fees</th><td class="num">{{ '%.2f%%'|format(rep.roi*100) if rep.roi is not none else '–' }} (PnL ${{ '%.2f'|format(rep.pnl) }})</td></tr></table></div>
+<div class="card"><h2>Reliability by p_mkt bucket (market favourite's side)</h2>
+<table><thead><tr><th>Bucket</th><th>n</th><th>avg p_mkt</th><th>avg p</th><th>win %</th><th>gap</th><th></th></tr></thead><tbody>
+{% for b in rep.buckets %}<tr><td>{{ b.label }}</td><td class="num">{{ b.n }}</td>
+<td class="num">{{ '%.1f'|format(b.avg_p_mkt*100) if b.avg_p_mkt is not none else '–' }}</td>
+<td class="num">{{ '%.1f'|format(b.avg_p*100) if b.avg_p is not none else '–' }}</td>
+<td class="num">{{ '%.1f'|format(b.win_rate*100) if b.win_rate is not none else '–' }}</td>
+<td class="num">{{ '%.1f'|format(b.gap*100) if b.gap is not none else '–' }}</td>
+<td>{% if not b.evaluated %}n&lt;20{% elif b.ok %}<span class="pos">ok</span>{% else %}<span class="neg">&gt;5pts</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="card"><h2>PnL by mode (all params versions)</h2>
+<table><thead><tr><th>Mode</th><th>Settled</th><th>Trades</th><th>PnL</th><th>ROI</th></tr></thead><tbody>
+{% for m in modes %}<tr><td>{{ m.mode }}</td><td class="num">{{ m.n }}</td><td class="num">{{ m.trades }}</td>
+<td class="num">${{ '%.2f'|format(m.pnl) }}</td><td class="num">{{ '%.2f%%'|format(m.roi*100) if m.roi is not none else '–' }}</td></tr>
+{% else %}<tr><td colspan="5">no settled rows yet</td></tr>{% endfor %}</tbody></table>
+<p><a href="/export.csv">Export ledger CSV</a></p></div>
+{% endblock %}
