@@ -1,0 +1,28 @@
+[Unit]
+Description=btc15 trade caller (Kalshi KXBTC15M)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=btc15
+Group=btc15
+WorkingDirectory=/var/lib/btc15
+EnvironmentFile=/etc/btc15/btc15.env
+Environment=DB_PATH=/var/lib/btc15/btc15.db KILL_FILE=/var/lib/btc15/KILL
+ExecStart=/opt/btc15/.venv/bin/btc15 run
+Restart=always
+RestartSec=5
+# A refused start (bad/unsafe config, exit code 2) must NOT crash-loop forever against real money:
+RestartPreventExitStatus=2
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/btc15
+CapabilityBoundingSet=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
