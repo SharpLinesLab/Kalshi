@@ -44,6 +44,25 @@ else
   echo "$ENVF already exists - left untouched"
 fi
 
+# Optional settings passed on the command line are written into the root-only env file (never into the repo):
+#   sudo DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...' PAPER_BANKROLL=500 bash scripts/setup.sh
+set_kv() {   # set_kv FILE KEY VALUE : replace or append KEY=VALUE without sed-escaping problems
+  local f="$1" k="$2" v="$3" t; t="$(mktemp)"
+  grep -v "^${k}=" "$f" > "$t" || true
+  printf '%s=%s\n' "$k" "$v" >> "$t"
+  cat "$t" > "$f"; rm -f "$t"
+}
+if [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]; then
+  [[ "$DISCORD_WEBHOOK_URL" =~ ^https://(discord|discordapp)\.com/api/webhooks/ ]] \
+    || { echo "DISCORD_WEBHOOK_URL must be a https://discord.com/api/webhooks/... URL"; exit 1; }
+  set_kv "$ENVF" DISCORD_WEBHOOK_URL "$DISCORD_WEBHOOK_URL"; echo "Discord alerts configured in $ENVF"
+fi
+if [[ -n "${PAPER_BANKROLL:-}" ]]; then
+  [[ "$PAPER_BANKROLL" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "PAPER_BANKROLL must be a number"; exit 1; }
+  set_kv "$ENVF" PAPER_BANKROLL "$PAPER_BANKROLL"; echo "Bankroll for sizing set to $PAPER_BANKROLL"
+fi
+chown root:btc15 "$ENVF"; chmod 640 "$ENVF"
+
 install -m 644 "$SRC/deploy/btc15.service" /etc/systemd/system/btc15.service
 cat > /usr/local/bin/btc15ctl <<'W'
 #!/usr/bin/env bash

@@ -102,6 +102,9 @@ fills vs position vs balance, or API positions vs ledger), ambiguous order outco
 Set `DISCORD_WEBHOOK_URL` (Discord: *Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL*).
 You get a message for each **BUY UP / BUY DOWN** call (size, price, max loss, payout, model p vs market, edge, proof status,
 and the mode: PAPER / DEMO / LIVE), the fill result, the **settlement result** (won/lost and PnL) and any **HALT**.
+On a server, pass it at install time so it lands in the root-only env file and never in git:
+`sudo DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...' PAPER_BANKROLL=500 bash scripts/setup.sh`
+(`PAPER_BANKROLL` is the bankroll the contract counts in alerts are sized for.)
 Alerts are informational and fire-and-forget: a failing webhook never affects trading, and the URL is never logged.
 There is deliberately **no sell / take-profit / stop-loss**: the strategy holds to settlement, and a binary contract's
 worst case is already the stake (shown as "max loss" in every alert).
