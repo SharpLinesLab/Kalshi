@@ -163,3 +163,30 @@ async def test_market_data_errors_do_not_crash_the_tick(tmp_path):
         raise KalshiError("HTTP 500", 500, False)
     fake.open_markets = boom
     assert await e.tick(NOW) is None
+
+
+async def test_composite_history_survives_a_restart_so_warmup_is_not_lost(tmp_path):
+    cfg, led, fake, ex, e, halt = build(tmp_path)
+    for s in range(1000, 1600):
+        e.book.series[s] = 100000.0 + s % 7
+    e.persist_series(1600.0)
+    e2 = Engine(cfg, led, fake, FeedBook(), ex, halt, AppState())               # "restart": new process, same DB
+    e2.restore_series(1600.0)
+    assert len(e2.book.series) == 600 and e2.book.series[1234] == 100000.0 + 1234 % 7
+    e2.persist_series(1601.0)                                                   # nothing new: no rewrite needed
+    assert led.load_series(0).keys() == e.book.series.keys()
+
+
+async def test_readiness_explains_what_is_missing_and_gives_an_eta(tmp_path):
+    cfg, led, fake, ex, e, halt = build(tmp_path)
+    await e.tick(NOW)
+    r = e.app.readiness
+    assert r["ready"] is False and r["predicting"] is False
+    names = {c["name"]: c["ok"] for c in r["checks"]}
+    assert names["history"] is False and names["feeds"] is False and names["not halted"] is True
+    assert r["history_eta_sec"] == int(1800 * 0.9)
+    for n in ("coinbase", "kraken", "bitstamp"):
+        e.book.on_message(n, 100000.0, now=NOW)
+    for s in range(int(NOW) - 1700, int(NOW)):
+        e.book.series[s] = 100000.0
+    assert e.readiness(NOW + 0.5, True)["checks"][1]["ok"] is True and e.readiness(NOW + 0.5, True)["history_eta_sec"] == 0

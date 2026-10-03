@@ -45,7 +45,7 @@ def create_app(cfg: Settings, app_state: AppState, ledger: Ledger, engine: Engin
         return {"mode": cfg.MODE, "now": time.time(), "decision": a.decision, "market": a.market, "feeds": a.feeds,
                 "clone_suspect": a.clone_suspect, "daily_pnl": a.daily_pnl, "total_pnl": a.total_pnl,
                 "open_position": a.open_position, "halted": a.halted, "proof": a.proof, "basis": a.basis,
-                "composite": a.composite, "bankroll": a.bankroll, "params_version": cfg.params_version()}
+                "composite": a.composite, "readiness": a.readiness, "bankroll": a.bankroll, "params_version": cfg.params_version()}
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS markets (
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, type TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS series (sec INTEGER PRIMARY KEY, px REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS basis_log (
   ticker TEXT PRIMARY KEY, ts REAL, strike REAL, composite_open REAL, sample REAL, ewma REAL,
   final60_composite REAL, official REAL, diff REAL
@@ -158,6 +159,19 @@ class Ledger:
         with self._lock:
             r = self.db.execute("SELECT sample FROM basis_log WHERE ticker=?", (ticker,)).fetchone()
         return bool(r and r["sample"] is not None)
+
+    # ------------------------------------------------------------ composite price history (warm-up survives restarts)
+    def save_series(self, items: list[tuple[int, float]], keep_after: int) -> None:
+        with self._lock:
+            self.db.execute("BEGIN")
+            self.db.executemany("INSERT OR REPLACE INTO series(sec,px) VALUES(?,?)", items)
+            self.db.execute("DELETE FROM series WHERE sec<?", (keep_after,))
+            self.db.execute("COMMIT")
+
+    def load_series(self, since_sec: int) -> dict[int, float]:
+        with self._lock:
+            rows = self.db.execute("SELECT sec,px FROM series WHERE sec>=?", (since_sec,)).fetchall()
+        return {r["sec"]: r["px"] for r in rows}
 
     # ------------------------------------------------------------ halt
     def halt_reason(self) -> Optional[str]:

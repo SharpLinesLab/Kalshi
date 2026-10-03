@@ -38,6 +38,7 @@ class AppState:
     composite: Optional[float] = None
     bankroll: float = 0.0
     ts: float = 0.0
+    readiness: Optional[dict] = None
 
 
 class Engine:
@@ -52,16 +53,50 @@ class Engine:
         self.basis: Optional[float] = None
         self.basis_ts: Optional[float] = None
         self._vol: tuple[float, Optional[float]] = (0.0, None)
-        self._t_proof = self._t_settle = self._t_recon = self._t_bank = 0.0
+        self._t_proof = self._t_settle = self._t_recon = self._t_bank = self._t_persist = 0.0
         self._kill_handled = False
         self.kill_requested: Optional[str] = None
         self.api_positions: dict[str, float] = {}
         b, bts = ledger.get_meta("basis"), ledger.get_meta("basis_ts")
         if b and bts:
             self.basis, self.basis_ts = float(b), float(bts)
+        self._persisted_upto = 0
+        self.restore_series(time.time())
         self.refresh_proof()
 
     # ------------------------------------------------------------------ helpers
+    def restore_series(self, now: float) -> int:
+        """Reload recent composite history so a restart does not reset the 30-minute warm-up.
+        Downtime shows up as missing seconds, so gap_pct stays honest."""
+        old = self.ledger.load_series(int(now) - 7200)
+        for sec, px in old.items():
+            self.book.series.setdefault(sec, px)
+        self._persisted_upto = max(old, default=0)
+        return len(old)
+
+    def persist_series(self, now: float) -> None:
+        new = [(s_, p_) for s_, p_ in self.book.series.items() if s_ > self._persisted_upto]
+        if new:
+            self.ledger.save_series(new, int(now) - 7200)
+            self._persisted_upto = max(s_ for s_, _ in new)
+
+    def readiness(self, now: float, predicting: bool) -> dict:
+        """Why predictions are (not) trustworthy yet, with an ETA for the data-window warm-up."""
+        sec = int(now)
+        present = sum(1 for s_ in range(sec - 1800, sec) if s_ in self.book.series)
+        need = int(1800 * (1 - self.cfg.MAX_GAP_PCT))
+        _, n_fresh, _ = self.book.composite(now)
+        checks = [
+            {"name": "feeds", "ok": n_fresh >= (3 if self.cfg.REQUIRE_3_FEEDS else 1), "detail": f"{n_fresh} fresh independent feeds"},
+            {"name": "history", "ok": present >= need, "detail": f"{present}/{need}s of the 1800s window"},
+            {"name": "volatility", "ok": self._vol[1] is not None, "detail": "realized vol available" if self._vol[1] is not None else "needs >= 60 clean 15s blocks"},
+            {"name": "basis", "ok": self._basis_value(now) is not None, "detail": "basis EWMA available" if self._basis_value(now) is not None else "waiting for the next market open"},
+            {"name": "kalshi quote", "ok": self.market is not None and self.market.yes_ask is not None, "detail": self.market.ticker if self.market else "no open market"},
+            {"name": "not halted", "ok": not self.halt.reason, "detail": self.halt.reason or ""},
+        ]
+        eta = max(0, need - present) if not checks[1]["ok"] else 0
+        return {"ready": all(c["ok"] for c in checks), "checks": checks, "history_eta_sec": eta,
+                "predicting": predicting}
     def refresh_proof(self) -> None:
         self.proof = proofmod.current(self.ledger, self.cfg.params_version())
 
@@ -205,6 +240,9 @@ class Engine:
         self.prev_action[m.ticker] = d.action
 
         # --- housekeeping
+        if now - self._t_persist > 10:
+            self._t_persist = now
+            self.persist_series(now)
         if now - self._t_settle > 5:
             self._t_settle = now
             await self.settle_pending(now)
@@ -241,6 +279,7 @@ class Engine:
     def _publish(self, now: float, dd: Optional[dict]) -> None:
         a, m = self.app, self.market
         a.mode, a.ts, a.decision = self.cfg.MODE, now, dd
+        a.readiness = self.readiness(now, bool(dd and dd.get("p") is not None))
         a.market = None if m is None else {
             "ticker": m.ticker, "strike": m.strike, "open_ts": m.open_ts, "close_ts": m.close_ts,
             "yes_bid": m.yes_bid, "yes_ask": m.yes_ask, "no_bid": m.no_bid, "no_ask": m.no_ask}

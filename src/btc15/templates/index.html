@@ -5,6 +5,7 @@
   <div id="line" class="sub"></div>
   <div id="chips" class="chips"></div>
 </div>
+<div class="card"><h2>Readiness <span id="rdy"></span></h2><div id="rchecks"></div></div>
 <div class="card"><h2>Why</h2><table>
   <tr><th>p (model) vs p_mkt</th><td id="why1" class="num"></td></tr>
   <tr><th>Edge after fee (up / down)</th><td id="why2" class="num"></td></tr>
@@ -47,6 +48,9 @@ function render(s){
     $('why2').textContent=f(d.edge_up)+' / '+f(d.edge_dn);
     $('why3').textContent=f(d.vol_used)+' · '+f(d.realized_vol)+' · '+f(d.implied_vol);
   }
+  const r=s.readiness; if(r){ $('rdy').textContent=r.ready?'READY':('WARMING UP'+(r.history_eta_sec?(' · ~'+Math.ceil(r.history_eta_sec/60)+' min of history left'):''));
+    $('rdy').className=r.ready?'pos':'neg';
+    $('rchecks').innerHTML=r.checks.map(c=>`<span class="chip ${c.ok?'pass':'fail'}">${c.name}: ${c.detail}</span>`).join(' '); }
   const m=s.market; $('why4').textContent=m?(m.ticker+' strike '+m.strike+' · yes '+c(m.yes_bid)+'/'+c(m.yes_ask)+' no '+c(m.no_bid)+'/'+c(m.no_ask)):'–';
   $('feeds').innerHTML=s.feeds.map(r=>`<tr><td>${r.feed}</td><td class="num">${r.mid==null?'–':r.mid.toFixed(2)}</td><td class="num">${r.age==null?'–':r.age.toFixed(1)+'s'}</td><td class="${r.status==='FRESH'?'pos':'neg'}">${r.status}</td></tr>`).join('');
   $('clone').textContent=s.clone_suspect?'FEED_CLONE_SUSPECT':'';
